@@ -26,11 +26,13 @@ volatile uint8_t bUpdateFlagsShared;
 
 unsigned long samplerate = 5000;
 unsigned long sampletime;
-int SampleCount;
+int SampleCount, estadoPM2 = HIGH, estadoPM10 = HIGH;
 int NoOfSamples = 12;  //maximum 14
-static long  PM2_Value, PM2_LowOcp;
-static long  PM10_Value, PM10_LowOcp;
+static long  PM2_Value;
+static long  PM10_Value;
 String AQIColour;
+float PM2_LowOcp, PM10_LowOcp;
+
 
 // shared variables are updated by the ISR and read by loop.
 // In loop we immediatley take local copies so that the ISR can keep ownership of the
@@ -53,8 +55,8 @@ void setup()
   SWM_PM_SETUP();
   // Ligar interrupciones a los pines de entrada
   // usado para leer los canales
-  attachInterrupt(digitalPinToInterrupt(PM10_IN_PIN), calcPM10, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PM2_IN_PIN), calcPM2, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PM10_IN_PIN), interrupcionPM, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PM2_IN_PIN), interrupcionPM, CHANGE);
   Serial.begin(115200);
   Wire.begin ();
   Wire.setClock(50000);
@@ -102,8 +104,6 @@ void CalculateDustValue()
   static uint8_t bUpdateFlags;
   static long    PM2_Output[15];
   static long    PM10_Output[15];
-
-
   // check shared update flags to see if any channels have a new signal
   if (bUpdateFlagsShared)
   {
@@ -121,12 +121,14 @@ void CalculateDustValue()
     {
       unPM10_In = unPM10_InShared;
       unPM10_Time = (unPM10_Time + unPM10_In);
+      unPM10_InShared = 0;
     }
 
     if (bUpdateFlags & PM2_FLAG)
     {
       unPM2_In = unPM2_InShared;
       unPM2_Time = (unPM2_Time + unPM2_In);
+      unPM2_InShared = 0;
     }
 
     // clear shared copy of updated flags as we have already taken the updates
@@ -165,31 +167,55 @@ void CalculateDustValue()
   */
   PM2_LowOcp = ((float)PM2_Output[0] / (samplerate * NoOfSamples * 10 ) );
   PM10_LowOcp = ((float)PM10_Output[0] / (samplerate * NoOfSamples * 10 ) );
+  Serial.println(PM2_LowOcp);
+  Serial.println(PM10_LowOcp);
   if (PM2_Output[0] / (samplerate * NoOfSamples * 10 ) >= 3 || PM10_Output[0] / (samplerate * NoOfSamples * 10 ) >= 3)
   {
-    PM2_Value = round((float)PM2_Output[0] / (samplerate * NoOfSamples * 10 ) * 600 / 7 + 250);
-    PM10_Value = round((float)PM10_Output[0] / (samplerate * NoOfSamples * 10 ) * 600 / 7 + 250);
+    PM2_Value = -10.747 * pow(PM2_LowOcp, 3) + 33.548 * pow(PM2_LowOcp, 2) + 78.617 * (PM2_LowOcp) - 0.5196;
+    PM10_Value = -10.747 * pow(PM10_LowOcp, 3) + 33.548 * pow(PM10_LowOcp, 2) + 78.617 * (PM10_LowOcp) - 0.5196;
   }
  else
   {
-    PM2_Value = -10.747 * pow(PM2_LowOcp, 3) + 33.548 * pow(PM2_LowOcp, 2) + 78.617 * PM2_LowOcp - 0.5196;
-    PM10_Value = -10.747 * pow(PM2_LowOcp, 3) + 33.548 * pow(PM2_LowOcp, 2) + 78.617 * PM10_LowOcp - 0.5196;
+    PM2_Value = -10.747 * pow(PM2_LowOcp, 3) + 33.548 * pow(PM2_LowOcp, 2) + 78.617 * (PM2_LowOcp) - 0.5196;
+    PM10_Value = -10.747 * pow(PM10_LowOcp, 3) + 33.548 * pow(PM10_LowOcp, 2) + 78.617 * (PM10_LowOcp) - 0.5196;
   }
-  bUpdateFlags = 0;  //reset flags and variables
-
 // Serial.print (PM2_Output[SampleCount]); Serial.print("\t");
-
+  bUpdateFlags = 0;
   if (SampleCount >= NoOfSamples)
   {
     SampleCount = 1;
 //    Serial.print (PM2_Output[0]); Serial.print("\t");Serial.println("\t");
-}
+  }
   else
   {
     SampleCount++;
   }
 
-  color();
+  if (PM2_Value <= 12 && PM10_Value <= 54)
+  {
+    AQIColour = "Green ";
+  }
+  else if (PM2_Value <= 35 && PM10_Value <= 154)
+  {
+    AQIColour = "Yellow";
+  }
+  else if (PM2_Value <= 55 && PM10_Value <= 254)
+  {
+    AQIColour = "Orange";
+  }
+  else if (PM2_Value <= 150 && PM10_Value <= 354)
+  {
+    AQIColour = " Red  ";
+  }
+  else if (PM2_Value <= 250 && PM10_Value <= 424)
+  {
+    AQIColour = "Purple";
+  }
+  else
+  {
+    AQIColour = "Maroon";
+  }
+
 }
 
 void calcPM10()
@@ -222,30 +248,34 @@ void calcPM2()
   }
 }
 
-void color()
+void interrupcionPM()
 {
-    // Colour Values based on US EPA Air Quality Index for PM 2.5 and PM 10
-  if (PM2_Value <= 12 && PM10_Value <= 54)
+  uint32_t us = micros();
+
+  if (estadoPM10 != digitalRead(PM10_IN_PIN))
   {
-    AQIColour = "Green ";
+    if ((estadoPM10 = digitalRead(PM10_IN_PIN)) == LOW)
+    {
+      ulPM10_Start = us;
+    }
+    else
+    {
+      unPM10_InShared += (uint16_t)(us - ulPM10_Start);
+      bUpdateFlagsShared |= PM10_FLAG;
+    }
   }
-  else if (PM2_Value <= 35 && PM10_Value <= 154)
+
+  if (estadoPM2 != digitalRead(PM2_IN_PIN))
   {
-    AQIColour = "Yellow";
+    if ( (estadoPM2 = digitalRead(PM2_IN_PIN) ) == LOW)
+    {
+      ulPM2_Start = us;
+    }
+    else
+    {
+      unPM2_InShared += (uint16_t)(us - ulPM2_Start);
+      bUpdateFlagsShared |= PM2_FLAG;
+    }
   }
-  else if (PM2_Value <= 55 && PM10_Value <= 254)
-  {
-    AQIColour = "Orange";
-  }
-  else if (PM2_Value <= 150 && PM10_Value <= 354)
-  {
-    AQIColour = " Red  ";
-  }
-  else if (PM2_Value <= 250 && PM10_Value <= 424)
-  {
-    AQIColour = "Purple";
-  }
-  else {
-    AQIColour = "Maroon";
-  }
+
 }
