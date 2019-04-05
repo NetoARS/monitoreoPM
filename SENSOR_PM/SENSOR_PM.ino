@@ -1,6 +1,28 @@
+#include "BluetoothSerial.h"
+#include <virtuabotixRTC.h>
+#include "FS.h"
+#include "SD.h"
+#include "SPI.h"
+#include <WiFi.h>
 #include <Wire.h>
 
 #define CPMonitorOP  //enable or disable monitoring on serial output
+#define pushbt 26
+
+const byte cupo = 32;
+char recividos[cupo];
+int ID,BS = 0,con = 0;
+String dato, archivo, ssid, password;
+long debouncing_time = 15; //Debouncing Time in Milliseconds
+volatile unsigned long last_micros;
+BluetoothSerial SerialBT;
+virtuabotixRTC myRTC(15, 2, 4);
+boolean newData = false;
+
+//Datos thingspeak
+String apiKey = "2DG3BNBX6JQAGVYI";
+const char* server = "api.thingspeak.com";
+WiFiClient client;
 
 //  Width Guide       "----------------------"
 #define SplashScreen "SM-PWM-01C, v1.2"
@@ -11,10 +33,6 @@ char ScreenFooter[] = "  Evaluation Only";
 #define PM10_IN_PIN 14   //input for PM10 signal, P2
 #define PM2_IN_PIN 27  //input for PM2 signal, P1
 
-
-// Assign your channel out pins - built in LED is 13
-//#define PM10_OUT_PIN 3
-//#define PM2_OUT_PIN 13
 
 // These bit flags are set in bUpdateFlagsShared to indicate which
 // channels have new signals
@@ -50,37 +68,271 @@ volatile uint16_t unPM2_InShared;
 uint32_t ulPM10_Start;
 uint32_t ulPM2_Start;
 
+void readFile(fs::FS &fs, const char * path)
+{
+    Serial.printf("Reading file: %s\n", path);
+
+    File file = fs.open(path);
+    if(!file){
+        Serial.println("Failed to open file for reading");
+        return;
+    }
+
+    Serial.print("Read from file: ");
+    while(file.available()){
+        Serial.write(file.read());
+    }
+    file.close();
+}
+
+void writeFile(fs::FS &fs, const char * path, const char * message)
+{
+    #ifdef CPMonitorOP
+    Serial.printf("Writing file: %s\n", path);
+    #endif
+
+    File file = fs.open(path, FILE_WRITE);
+    if(!file){
+        #ifdef CPMonitorOP
+        Serial.println("Failed to open file for writing");
+        #endif
+        return;
+    }
+    if(file.print(message)){
+        #ifdef CPMonitorOP
+        Serial.println("File written");
+        #endif
+    } else {
+        #ifdef CPMonitorOP
+        Serial.println("Write failed");
+        #endif
+    }
+    file.close();
+}
+
+void appendFile(fs::FS &fs, const char * path, const char * message)
+{
+    #ifdef CPMonitorOP
+    Serial.printf("Appending to file: %s\n", path);
+    #endif
+    File file = fs.open(path, FILE_APPEND);
+    if(!file){
+        #ifdef CPMonitorOP
+        Serial.println("Failed to open file for appending");
+        #endif
+        return;
+    }
+    if(file.print(message)){
+        #ifdef CPMonitorOP
+        Serial.println("Message appended");
+        #endif
+        if(con==2)
+        {
+          SerialBT.println("Message appended");
+        }
+    } else {
+        #ifdef CPMonitorOP
+        Serial.println("Append failed");
+        #endif
+        if(con==2)
+        {
+          SerialBT.println("Append failed");
+        }
+    }
+    file.close();
+}
+
+void callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param)
+{
+  if(event == ESP_SPP_SRV_OPEN_EVT)
+  {
+    #ifdef CPMonitorOP
+    Serial.println("Celular Conectado");
+    #endif
+    con=1;
+  }
+  if(event == ESP_SPP_CLOSE_EVT)
+  {
+    #ifdef CPMonitorOP
+    Serial.println("Celular Desconectado");
+    #endif
+    con=0;
+  }
+}
+
 void setup()
 {
   SWM_PM_SETUP();
   // Ligar interrupciones a los pines de entrada
   // usado para leer los canales
+  attachInterrupt(digitalPinToInterrupt(pushbt), debounceInterrupt, RISING);
   attachInterrupt(digitalPinToInterrupt(PM10_IN_PIN), interrupcionPM, CHANGE);
   attachInterrupt(digitalPinToInterrupt(PM2_IN_PIN), interrupcionPM, CHANGE);
+  SerialBT.register_callback(callback);
   Serial.begin(115200);
   Wire.begin ();
   Wire.setClock(50000);
+  sdConfig();
   #ifdef CPMonitorOP
     Serial.println("Arduino Dust & CO2 Value Calculation");
     Serial.print("Dust Sensor sample rate of ");  Serial.print(samplerate / 1000); Serial.print(" sec, with rolling average over "); Serial.print(samplerate / 1000 * NoOfSamples); Serial.println(" sec.");
     Serial.println(SplashScreen);
   #endif
-  //TWBR = 152;  // 50 kHz
-  //Wire.setClock(50000);
 }
 
 //NO USAR DELAY EN EL LOOP
 void loop()
 {
+  if(con==1)
+  {
+    #ifdef CPMonitorOP
+    Serial.println("Celular Conectado...");
+    #endif
+    SerialBT.println("Conectado...");
+    SerialBT.println("Configuracion wifi...........w ");
+    SerialBT.println("Solo monitoreo...............m ");
+    do
+    {
+      leer();
+    }while(newData==false || con == 0);
+    check();
+    if(*recividos=='w')
+    {
+      SerialBT.println("WIFI_SSID:");
+      do
+      {
+        leer();
+      }while(newData==false || con == 0);
+      check();
+      ssid=recividos;
+      #ifdef CPMonitorOP
+      Serial.println(ssid);
+      #endif
+      SerialBT.println("PASSWORD:");
+      do
+      {
+        leer();
+      }while(newData==false);
+      check();
+      password = recividos;
+      Serial.println(password);
+      WiFi.begin( ssid.c_str(), password.c_str() );
+      Serial.println();
+      Serial.println();
+      Serial.print("Connecting to ");
+      Serial.println(ssid);
+      WiFi.begin( ssid.c_str(), password.c_str() );
+      while (WiFi.status() != WL_CONNECTED)
+      {
+        delay(500);
+        Serial.print(".");
+      }
+      Serial.println("");
+      Serial.println("WiFi connected");
+      con = 2;
+    }
+    if(*recividos == 'm')
+    {
+      con = 2;
+    }
+  }
+  if(BS == 1)
+  {
+    BS = 3;
+    SerialBT.end();
+  }
   if (millis() >= (samplerate + sampletime))
   {
     CalculateDustValue();
+    if(SampleCount == 1)
+    {
+      mostrar();
+    }
+    else
+    {
+
       #ifdef CPMonitorOP
         Serial.print("PM2.5: "); Serial.print (PM2_Value); Serial.print(" "); Serial.print("g/m3"); Serial.print("\t");
         Serial.print("PM10:  "); Serial.print (PM10_Value); Serial.print(" "); Serial.print("g/m3  ");
         Serial.print("AQI Colour Code: "); Serial.println(AQIColour);
       #endif
+
+    }
   }
+}
+
+void mostrar()
+{
+  myRTC.updateTime();
+  dato=String(ID)+","+String(myRTC.dayofmonth)+"/"+String(myRTC.month)+"/"+String(myRTC.year)+","+String(myRTC.hours)+":"+String(myRTC.minutes)+":"+String(myRTC.seconds)+","+String(PM10_Value)+","+String(PM2_Value)+","+String(AQIColour)+ "\r\n";
+  appendFile(SD, archivo.c_str(), dato.c_str());
+  Serial.println(dato);
+
+  if(con=2)
+  {
+    SerialBT.println(dato);
+  }
+  if (client.connect(server,80))
+  {
+    String postStr = apiKey;
+    postStr +="&field1=";
+    postStr += String(PM10_Value);
+    postStr +="&field2=";
+    postStr += String(PM2_Value);
+    postStr += "\r\n\r\n";
+    client.print("POST /update HTTP/1.1\n");
+    client.print("Host: api.thingspeak.com\n");
+    client.print("Connection: close\n");
+    client.print("X-THINGSPEAKAPIKEY: "+apiKey+"\n");
+    client.print("Content-Type: application/x-www-form-urlencoded\n");
+    client.print("Content-Length: ");
+    client.print(postStr.length());
+    client.print("\n\n");
+    client.print(postStr);
+    Serial.println("% send to Thingspeak");
+  }
+}
+
+void sdConfig()
+{
+
+  if( !SD.begin() )
+  {
+      #ifdef CPMonitorOP
+      Serial.println("Card Mount Failed");
+      #endif
+      return;
+  }
+      uint8_t cardType = SD.cardType();
+
+  if( cardType == CARD_NONE )
+  {
+        #ifdef CPMonitorOP
+        Serial.println("No SD card attached");
+        #endif
+        return;
+  }
+
+  myRTC.updateTime();
+  archivo = "/" + String(myRTC.dayofmonth) + "-" + String(myRTC.month) + "-" +
+  String(myRTC.year) + ".txt";
+  File file = SD.open( archivo.c_str() );
+  if(!file)
+  {
+    #ifdef CPMonitorOP
+    Serial.println("File doens't exist");
+    Serial.println("Creating file...");
+    #endif
+    writeFile(SD, archivo.c_str(), "ID, Date, Hour, PM10, PM2.5, color\r\n");
+  }
+  else
+  {
+    #ifdef CPMonitorOP
+    Serial.println("File already exists");
+    #endif
+  }
+  file.close();
+
 }
 
 void SWM_PM_SETUP()
@@ -250,8 +502,8 @@ void calcPM2()
 
 void interrupcionPM()
 {
-  uint32_t us = micros();
 
+  uint32_t us = micros();
   if (estadoPM10 != digitalRead(PM10_IN_PIN))
   {
     if ((estadoPM10 = digitalRead(PM10_IN_PIN)) == LOW)
@@ -264,7 +516,6 @@ void interrupcionPM()
       bUpdateFlagsShared |= PM10_FLAG;
     }
   }
-
   if (estadoPM2 != digitalRead(PM2_IN_PIN))
   {
     if ( (estadoPM2 = digitalRead(PM2_IN_PIN) ) == LOW)
@@ -278,4 +529,66 @@ void interrupcionPM()
     }
   }
 
+}
+
+void leer()
+{
+    static boolean reciviendo = false;
+    static byte ndx = 0;
+    char inicio = '<';
+    char fin = '>';
+    char rc;
+
+    while (SerialBT.available() > 0 && newData == false) {
+        rc = SerialBT.read();
+
+        if (reciviendo == true)
+        {
+            if (rc != fin)
+            {
+                recividos[ndx] = rc;
+                ndx++;
+                if (ndx >= cupo)
+                {
+                    ndx = cupo - 1;
+                }
+            }
+            else
+            {
+                recividos[ndx] = '\0'; // terminate the string
+                reciviendo = false;
+                ndx = 0;
+                newData = true;
+            }
+        }
+
+        else if (rc == inicio) {
+            reciviendo = true;
+        }
+    }
+}
+
+void check()
+{
+    if (newData == true) {
+        Serial.print("se recivio: ");
+        Serial.println(recividos);
+        newData = false;
+    }
+}
+
+void blueswitch ()
+{
+  if(BS==0)
+  {
+    BS=1;
+  }
+}
+
+void debounceInterrupt()
+{
+ if((long)(micros() - last_micros) >= debouncing_time * 1000) {
+   blueswitch();
+   last_micros = micros();
+ }
 }
