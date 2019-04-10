@@ -172,6 +172,7 @@ void setup()
   Serial.begin(115200);
   Wire.begin ();
   Wire.setClock(50000);
+  SerialBT.begin("ESP32test");
   sdConfig();
   #ifdef CPMonitorOP
     Serial.println("Arduino Dust & CO2 Value Calculation");
