@@ -273,7 +273,7 @@ void mostrar()
 //dato de LPO
   dato = String(ID) + "," + String(myRTC.dayofmonth) + "/" + String(myRTC.month) +
   "/" + String(myRTC.year) + "," + String(myRTC.hours) + ":" + String(myRTC.minutes)
-  + ":" + String(myRTC.seconds) + "," + String(PM10_LowOcp) + "," 
+  + ":" + String(myRTC.seconds) + "," + String(PM10_LowOcp) + ","
   + String(PM2_LowOcp) + "\r\n";
 
 //Adjuntando dato a la SD
@@ -335,7 +335,10 @@ void sdConfig()
     Serial.println("File doens't exist");
     Serial.println("Creating file...");
     #endif
+    //fila para microgramo
     writeFile(SD, archivo.c_str(), "ID, Date, Hour, PM10, PM2.5, color\r\n");
+    //fila para LPO
+    writeFile(SD, archivo.c_str(), "ID, Date, Hour, PM10, PM2.5\r\n");
   }
   else
   {
