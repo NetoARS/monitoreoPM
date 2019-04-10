@@ -265,7 +265,18 @@ void loop()
 void mostrar()
 {
   myRTC.updateTime();
-  dato=String(ID)+","+String(myRTC.dayofmonth)+"/"+String(myRTC.month)+"/"+String(myRTC.year)+","+String(myRTC.hours)+":"+String(myRTC.minutes)+":"+String(myRTC.seconds)+","+String(PM10_Value)+","+String(PM2_Value)+","+String(AQIColour)+ "\r\n";
+//dato de en microgramos por metro cuadrado
+  /*dato = String(ID) + "," + String(myRTC.dayofmonth) + "/" + String(myRTC.month) +
+  "/" + String(myRTC.year) + "," + String(myRTC.hours) + ":" + String(myRTC.minutes)
+  + ":" + String(myRTC.seconds) + "," + String(PM10_Value) + "," + String(PM2_Value)
+  + "," + String(AQIColour) + "\r\n";*/
+//dato de LPO
+  dato = String(ID) + "," + String(myRTC.dayofmonth) + "/" + String(myRTC.month) +
+  "/" + String(myRTC.year) + "," + String(myRTC.hours) + ":" + String(myRTC.minutes)
+  + ":" + String(myRTC.seconds) + "," + String(PM10_LowOcp) + "," 
+  + String(PM2_LowOcp) + "\r\n";
+
+//Adjuntando dato a la SD
   appendFile(SD, archivo.c_str(), dato.c_str());
   Serial.println(dato);
 
@@ -448,22 +459,27 @@ void CalculateDustValue()
   {
     AQIColour = "Green ";
   }
+
   else if (PM2_Value <= 35 && PM10_Value <= 154)
   {
     AQIColour = "Yellow";
   }
+
   else if (PM2_Value <= 55 && PM10_Value <= 254)
   {
     AQIColour = "Orange";
   }
+
   else if (PM2_Value <= 150 && PM10_Value <= 354)
   {
     AQIColour = " Red  ";
   }
+
   else if (PM2_Value <= 250 && PM10_Value <= 424)
   {
     AQIColour = "Purple";
   }
+
   else
   {
     AQIColour = "Maroon";
