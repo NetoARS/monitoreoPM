@@ -218,35 +218,6 @@ void CalculateDustValue()
 
 }
 
-void calcPM10()
-{
-  // if the pin is low, its a falling edge of the signal pulse, so lets record its value
-  if (digitalRead(PM10_IN_PIN) == LOW)
-  {
-    ulPM10_Start = micros();
-  }
-  else
-  {
-    // else it must be a rising edge, so lets get the time and subtract the time of the rising edge
-    // this gives use the time between the falling and rising edges i.e. the pulse duration.
-    unPM10_InShared = (uint16_t)(micros() - ulPM10_Start);
-    // use set the PM10_ flag to indicate that a new PM10_ signal has been received
-    bUpdateFlagsShared |= PM10_FLAG;
-  }
-}
-
-void calcPM2()
-{
-  if (digitalRead(PM2_IN_PIN) == LOW)
-  {
-    ulPM2_Start = micros();
-  }
-  else
-  {
-    unPM2_InShared = (uint16_t)(micros() - ulPM2_Start);
-    bUpdateFlagsShared |= PM2_FLAG;
-  }
-}
 
 void interrupcionPM()
 {
